@@ -1,0 +1,190 @@
+/* 作品表示用共通CSS */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-image: url('../assets/work-display-background.png');
+    background-position: center center;
+    background-size: cover;
+    background-repeat: no-repeat;
+    background-attachment: fixed;
+    color: black;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: center;
+    padding: 20px 0;
+    overflow-y: auto;
+}
+
+.work-container {
+    width: 60%;
+    max-width: 1200px;
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    min-height: calc(100vh - 40px);
+    justify-content: center;
+    gap: 20px;
+}
+
+video {
+    width: 100%;
+    height: auto;
+    max-height: 80%;
+    border-radius: 10px;
+    border: 3px solid #c1c6ba;
+    margin: 20px 0;
+}
+
+.title {
+    font-size: 2.5rem;
+    margin-bottom: 15px;
+    color: #ffffff;
+    text-shadow: 2px 2px 4px rgba(0, 0, 0, 0.5);
+    -webkit-text-stroke: 10px #1a5b00;
+    paint-order: stroke;
+}
+
+.description {
+    font-size: 1.2rem;
+    color: #131c13;
+    margin-bottom: 30px;
+    line-height: 1.6;
+    white-space: pre-line;
+    max-width: 800px;
+}
+
+.meta-info {
+    display: flex;
+    gap: 30px;
+    margin-bottom: 30px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.meta-item {
+    color: #000000;
+    font-size: 1rem;
+}
+
+.meta-label {
+    color: #000;
+    font-weight: bold;
+}
+
+.controls {
+    margin: 30px 0 20px 0;
+    display: flex;
+    gap: 15px;
+    justify-content: flex-start;
+    width: 100%;
+}
+
+.back-button {
+    padding: 12px 24px;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.1rem;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.back-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+}
+
+.credit-section {
+    margin: 20px 0;
+    max-width: 600px;
+    width: 100%;
+}
+
+.credit-title {
+    font-size: 1.2rem;
+    color: #000;
+    text-align: center;
+    margin-bottom: 15px;
+    font-weight: bold;
+}
+
+.credit-content {
+    background: rgb(79 101 68 / 10%);
+    padding: 20px;
+    border-radius: 20px;
+    font-size: 0.9rem;
+    line-height: 1.5;
+    white-space: pre-line;
+    color: #000;
+    max-height: 200px;
+    overflow-y: auto;
+    text-align: center;
+}
+
+/* 動画アイテム */
+.movie-item {
+    margin: 20px 0;
+    width: 100%;
+}
+
+/* 画像ギャラリー */
+.image-gallery {
+    display: grid;
+    grid-template-columns: repeat(1, 1fr);
+    gap: 15px;
+    margin: 20px 0;
+    width: 100%;
+    max-width: 800px;
+}
+
+.image-item img {
+    width: 100%;
+    height: auto;
+    border-radius: 8px;
+    border: 2px solid #c1c6ba;
+    cursor: pointer;
+    transition: transform 0.3s ease;
+}
+
+.image-item img:hover {
+    transform: scale(1.05);
+}
+
+/* 画像モーダル(拡大表示) */
+.modal {
+    display: none;
+    position: fixed;
+    z-index: 1000;
+    left: 0;
+    top: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.9);
+    cursor: pointer;
+}
+
+.modal-content {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    height: 100%;
+    padding: 20px;
+}
+
+.modal-content img {
+    max-width: 90%;
+    max-height: 90%;
+    object-fit: contain;
+    border-radius: 8px;
+    border: 2px solid #c1c6ba;
+}

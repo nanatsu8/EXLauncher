@@ -1,0 +1,21 @@
+<div class="image-gallery">
+    {imageItems}
+</div>
+
+<!-- 画像モーダル -->
+<div id="imageModal" class="modal" onclick="closeImageModal()">
+    <div class="modal-content">
+        <img id="modalImage" src="" alt="拡大画像">
+    </div>
+</div>
+
+<script>
+    function openImageModal(src) {
+        document.getElementById('modalImage').src = src;
+        document.getElementById('imageModal').style.display = 'block';
+    }
+
+    function closeImageModal() {
+        document.getElementById('imageModal').style.display = 'none';
+    }
+</script>

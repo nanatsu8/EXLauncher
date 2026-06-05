@@ -1,0 +1,44 @@
+**/node_modules/
+**/.venv/
+**/__pycache__/
+
+
+config.json5
+data.csv
+
+build-icon-guide.md
+
+assets/
+
+# IDE and Git files
+.git
+.github
+.vscode
+
+# Python automation build outputs
+exhibition-automation/build/
+exhibition-automation/dist/
+exhibition-automation/*.exe
+exhibition-automation/*.spec
+
+# All works trees
+**/works/
+**/works/**
+**/works_backup/
+**/works_backup/**
+**/works_staging/
+**/works_staging/**
+
+# Launcher package output
+exhibition-launcher/dist/
+win-unpacked
+launcher-win
+
+# Local automation data and scratch files
+exhibition-automation/token.json
+exhibition-automation/credentials.json
+exhibition-automation/downloads/
+exhibition-automation/todo.md
+
+# Docs
+docs

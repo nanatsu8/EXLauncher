@@ -1,0 +1,29 @@
+<!-- サムネイル装飾エリア -->
+<div class="thumbnail-decoration">
+    <img src="{thumbnailSrc}" alt="{title}" class="work-thumbnail">
+    <div class="decoration-title">{title}</div>
+</div>
+
+<!-- 情報バブル -->
+<div class="info-bubble">
+    <div class="info-bubble-text">
+        <div class="bubble-info">
+            <span class="genre-label">ジャンル:</span> {genre}<br>
+            <!-- <span class="time-label">プレイ時間:</span> {estimatedPlayTime}<br> -->
+        </div>
+        <div class="bubble-author">制作: {author}</div>
+        <div class="bubble-description">{description}</div>
+    </div>
+</div>
+
+<!-- ボタンエリア -->
+<div class="button-area">
+    <button class="launch-button {type}-type" data-work-id="{workId}" data-type="{type}" data-path="{path}" onclick="launchWork(this)">
+        {buttonText}
+    </button>
+</div>
+
+<!-- マスコット -->
+<div class="maskot">
+    <!-- CSSで背景画像として表示 -->
+</div>

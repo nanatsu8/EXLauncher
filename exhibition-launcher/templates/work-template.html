@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{title}</title>
+    <link rel="stylesheet" href="../../templates/work-display.css">
+</head>
+
+<body>
+    <div class="work-container">
+        <div class="controls">
+            <button class="back-button" onclick="backToLauncher()">作品一覧に戻る</button>
+        </div>
+        <h1 class="title">{title}</h1>
+        <p class="description">{description}</p>
+
+        <div class="meta-info">
+            <div class="meta-item">
+                <span class="meta-label">制作者:</span> {author}
+            </div>
+            <div class="meta-item">
+                <span class="meta-label">ジャンル:</span> {genre}
+            </div>
+        </div>
+
+        <!-- 画像コンテンツ -->
+        {imageContent}
+
+        <!-- 動画コンテンツ -->
+        {movieContent}
+
+        <div class="credit-section">
+            <div class="credit-title">クレジット</div>
+            <div class="credit-content">
+                {credit}
+            </div>
+        </div>
+
+        <div class="controls">
+            <button class="back-button" onclick="backToLauncher()">作品一覧に戻る</button>
+        </div>
+    </div>
+
+    <script>
+        async function backToLauncher() {
+            try {
+                if (window.electronAPI) {
+                    await window.electronAPI.backToLauncher();
+                } else {
+                    window.close();
+                }
+            } catch (error) {
+                console.error('作品一覧に戻るエラー:', error);
+                window.close();
+            }
+        }
+    </script>
+</body>
+
+</html>
