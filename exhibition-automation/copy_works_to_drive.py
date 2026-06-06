@@ -17,7 +17,9 @@ import argparse
 import json
 import os
 import shutil
+import stat
 import sys
+import time
 from pathlib import Path
 from typing import Iterable
 
@@ -56,6 +58,30 @@ def iter_source_files(src: Path, excludes: set[str]) -> Iterable[Path]:
 
 def ensure_parent(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+
+
+def remove_readonly_and_retry(func, path, _exc_info) -> None:
+    os.chmod(path, stat.S_IWRITE)
+    func(path)
+
+
+def rmtree_with_retry(target: Path, retries: int = 8, delay_sec: float = 0.5) -> None:
+    if not target.exists():
+        return
+
+    last_error = None
+    for attempt in range(1, retries + 1):
+        try:
+            shutil.rmtree(target, onerror=remove_readonly_and_retry)
+            return
+        except OSError as e:
+            last_error = e
+            if getattr(e, "winerror", None) in {5, 32} and attempt < retries:
+                time.sleep(delay_sec)
+                continue
+            raise
+    if last_error:
+        raise last_error
 
 
 def copy_changed_files(src: Path, dst: Path, excludes: set[str]) -> tuple[int, int]:
@@ -224,8 +250,6 @@ def main() -> int:
     excludes.update(name.lower() for name in config.get("copy_exclude_names", []))
     excludes.update(name.lower() for name in args.exclude)
 
-    dst.mkdir(parents=True, exist_ok=True)
-
     print("=" * 50)
     print("copy_works_to_drive")
     print("=" * 50)
@@ -233,6 +257,22 @@ def main() -> int:
     print(f"コピー先: {dst}")
     print(f"mirror  : {args.mirror}")
     print("-" * 50)
+
+    try:
+        if dst.exists():
+            print(f"既存のコピー先を削除しています: {dst}")
+            rmtree_with_retry(dst)
+        dst.mkdir(parents=True, exist_ok=True)
+    except Exception as e:
+        report = describe_exception(e)
+        print_error_report(
+            "コピー先の削除に失敗しました",
+            report.summary,
+            code=report.code,
+            hint=report.hint,
+            detail=report.detail,
+        )
+        return 1
 
     copied, skipped = copy_changed_files(src, dst, excludes)
     removed_files = 0

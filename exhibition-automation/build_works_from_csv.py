@@ -196,12 +196,12 @@ class CSVDataClient:
             )
             return fallback
 
-        if parsed < 0:
-            print(
-                "警告: priority は 0 以上で指定してください。"
-                f" 値='{normalized}' は {fallback} を使用します。"
-            )
-            return fallback
+        # if parsed < 0:
+        #     print(
+        #         "警告: priority は 0 以上で指定してください。"
+        #         f" 値='{normalized}' は {fallback} を使用します。"
+        #     )
+        #     return fallback
 
         return parsed
 
@@ -500,10 +500,32 @@ class LauncherStructureGenerator:
 
         return None
 
+    def _cleanup_extraneous_work_files(self, work_dir: Path) -> None:
+        """ZIP展開後、work_file 以外の作品ファイルや zip を削除する"""
+        preserve_names = {
+            self.config.config_file_name,
+            self.config.thumbnail_folder_name,
+            self.config.work_file_folder_name,
+        }
+
+        for item in work_dir.iterdir():
+            if item.name in preserve_names or item.name.startswith("."):
+                continue
+
+            try:
+                if item.is_dir():
+                    self._rmtree_with_retry(item)
+                else:
+                    item.unlink()
+                print(f"不要ファイルを削除: {item.name}")
+            except Exception as e:
+                print(f"削除失敗: {item} ({e})")
+
     def _extract_zip_file(self, zip_path: Path) -> bool:
         """ZIPファイルを展開"""
         try:
-            extract_dir = zip_path.parent / self.config.work_file_folder_name
+            work_dir = zip_path.parent
+            extract_dir = work_dir / self.config.work_file_folder_name
             extract_dir.mkdir(exist_ok=True)
 
             print(f"ZIPファイルを展開中: {zip_path.name}")
@@ -511,6 +533,7 @@ class LauncherStructureGenerator:
                 zip_ref.extractall(extract_dir)
 
             print(f"展開完了: {extract_dir}")
+            self._cleanup_extraneous_work_files(work_dir)
             return True
         except zipfile.BadZipFile:
             print(f"エラー: {zip_path} は無効なZIPファイルです")
