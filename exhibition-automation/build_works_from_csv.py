@@ -9,7 +9,7 @@ import stat
 import sys
 import time
 import zipfile
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional
 
@@ -36,6 +36,7 @@ class Config:
     # None の場合は全行（ヘッダー行は自動で除外）
     start_row: Optional[int] = None
     end_row: Optional[int] = None
+    use_incremental_build: bool = True
 
     # 作品タイプ判定
     exe_type_identifier: str = "ゲーム(.exe)"
@@ -58,7 +59,7 @@ class Config:
     temp_file_prefix: str = "temp"
 
     # 列マッピング設定
-    column_mapping: Dict[str, int] = None
+    column_mapping: Dict[str, int] = field(default_factory=dict)
 
     @classmethod
     def from_file(cls, config_path: str = "config.json5") -> Config:
@@ -100,10 +101,10 @@ class Config:
             return cls(**{k: v for k, v in config_data.items() if k in cls.__dataclass_fields__})
         except FileNotFoundError as e:
             raise FileNotFoundError(str(e))
-        except Exception as e:
-            raise ValueError(f"設定ファイルの読み込みエラー: {e}")
         except TypeError as e:
             raise ValueError(f"設定ファイルに必要なフィールドが不足しています: {e}")
+        except Exception as e:
+            raise ValueError(f"設定ファイルの読み込みエラー: {e}")
 
 
 @dataclass
@@ -800,6 +801,19 @@ class LauncherStructureGenerator:
             # ダウンロードディレクトリを作成
             self.download_dir.mkdir(parents=True, exist_ok=True)
 
+            # 前回のCSVデータを読み込み（比較用）
+            old_works = []
+            old_csv_path = self.download_dir / Path(self.config.csv_input_path).name
+            if self.config.use_incremental_build and old_csv_path.exists():
+                print(f"前回のCSVと比較して差分のみ処理します: {old_csv_path}")
+                try:
+                    original_csv_path = self.config.csv_input_path
+                    self.config.csv_input_path = str(old_csv_path)
+                    old_works = sorted(self.data_client.get_csv_data(), key=lambda x: x.timestamp)
+                    self.config.csv_input_path = original_csv_path
+                except Exception as e:
+                    print(f"警告: 前回のCSVの読み込みに失敗しました。全件処理します。 ({e})")
+
             success_count = 0
             total_count = len(works)
 
@@ -815,19 +829,31 @@ class LauncherStructureGenerator:
                 base_index = self.config.start_row - 1
 
             for index, work in enumerate(works_sorted, 1):
-                print(f"\n処理中 ({index}/{total_count}): {work.title}")
-
                 # 実際の行番号に対応するインデックスを計算
                 actual_index = base_index + index - 1
+
+                # フォルダ名を生成
+                folder_name = self.generate_folder_name(actual_index, work.title)
+                work_dir = self.download_dir / folder_name
+
+                # 差分比較: 前回のデータと同じ、かつフォルダが存在する場合はスキップ
+                if (
+                    self.config.use_incremental_build
+                    and index <= len(old_works)
+                    and work == old_works[index - 1]
+                    and work_dir.exists()
+                ):
+                    print(f"情報: 変更がないためスキップします ({index}/{total_count}): {work.title}")
+                    success_count += 1
+                    continue
+
+                print(f"\n処理中 ({index}/{total_count}): {work.title}")
 
                 # skip_build=0 の行は完全にスキップ（フォルダ未生成）
                 if not self.data_client.parse_skip_build(work.skip_build):
                     print(f"情報: skip_build=0 のためスキップします ({work.title})")
                     continue
 
-                # フォルダ名を生成
-                folder_name = self.generate_folder_name(actual_index, work.title)
-                work_dir = self.download_dir / folder_name
                 work_dir.mkdir(exist_ok=True)
 
                 if work.thumbnail_file_name.strip():
@@ -886,7 +912,7 @@ class LauncherStructureGenerator:
                     print(f"情報: show_in_launcher=0 のため非表示として生成します ({work.title})")
 
                 # visible状態を追加（show_in_launcher=1 かつ必要ファイルが揃う場合のみ true）
-                file_info["visible"] = should_show and thumbnail_success and work_file_success
+                file_info["visible"] = str(should_show and thumbnail_success and work_file_success)
 
                 priority_value = self.data_client.parse_priority(work.priority, actual_index)
 
@@ -912,6 +938,10 @@ class LauncherStructureGenerator:
             # ステージング内のマニフェストを生成
             self.write_manifest()
 
+            # CSVをコピー（次回の比較用）
+            shutil.copy2(self.config.csv_input_path, old_csv_path)
+            print(f"CSVをコピーしました: {old_csv_path}")
+
             print(f"\n" + "=" * 50)
             print(f"処理完了: {success_count}/{total_count} 作品を正常に処理")
             print(f"出力先: {self.download_dir}")
@@ -935,7 +965,7 @@ class LauncherStructureGenerator:
                 rel = file_path.relative_to(self.download_dir).as_posix()
                 sha256 = hashlib.sha256()
                 with open(file_path, "rb") as f:
-                    for chunk in iter(lambda: f.read(65536), b""):
+                    while chunk := f.read(65536):
                         sha256.update(chunk)
                 files[rel] = sha256.hexdigest()
 
