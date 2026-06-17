@@ -26,11 +26,13 @@
         "icon": "assets/kswl-logo256.ico",
         "files": [
             "main.js",
-            "preload.js",
-            "renderer/**/*",
-            "assets/**/*"
+            "preload.js"
         ],
         "extraResources": [
+            {
+                "from": "renderer/",
+                "to": "renderer/"
+            },
             {
                 "from": "templates/",
                 "to": "templates/"

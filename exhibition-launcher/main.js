@@ -181,8 +181,14 @@ async function createWindow() {
         },
         icon: path.join(__dirname, appConfig.icon)
     });
+    const baseDir = app.isPackaged
+        ? process.resourcesPath
+        : __dirname;
 
-    mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
+    mainWindow.loadFile(
+        path.join(baseDir, 'renderer', 'index.html')
+    );
+    // mainWindow.loadFile(path.join(__dirname, 'renderer', 'index.html'));
 
     // 設定によって起動時に最大化してから表示
     if (appConfig && appConfig.startMaximized === true) {

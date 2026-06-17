@@ -942,6 +942,9 @@ class LauncherStructureGenerator:
             shutil.copy2(self.config.csv_input_path, old_csv_path)
             print(f"CSVをコピーしました: {old_csv_path}")
 
+            # ステージング内のマニフェストを生成
+            self.write_manifest()
+
             print(f"\n" + "=" * 50)
             print(f"処理完了: {success_count}/{total_count} 作品を正常に処理")
             print(f"出力先: {self.download_dir}")
