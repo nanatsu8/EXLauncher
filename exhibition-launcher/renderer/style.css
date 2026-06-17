@@ -146,6 +146,9 @@ body {
     background-repeat: no-repeat;
     background-position: center;
     justify-self: center;
+    width: 100%;
+    aspect-ratio: 803 / 1080;
+    overflow: hidden;
 }
 
 /* サムネイル画像の配置 */
