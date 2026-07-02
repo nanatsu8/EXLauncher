@@ -665,6 +665,7 @@ class LauncherStructureGenerator:
         result = {}
         movie_paths = []
         image_paths = []
+        pdf_paths = []
 
         # サムネイルファイルを探してImagePathsに追加
         thumbnail_dir = work_dir / self.config.thumbnail_folder_name
@@ -719,6 +720,18 @@ class LauncherStructureGenerator:
                         file_path.rename(target_path)
                         image_paths.append(original_name)
 
+            elif original_suffix == ".pdf":
+                # PDFファイルの処理（元のファイル名を保持）
+                target_path = work_dir / original_name
+
+                # 移動先に同名ファイルがないか確認
+                if target_path.exists():
+                    print(f"スキップ: {original_name} は既に存在します")
+                    pdf_paths.append(original_name)
+                else:
+                    file_path.rename(target_path)
+                    pdf_paths.append(original_name)
+
             else:
                 # その他のファイル形式（元のファイル名を保持）
                 target_path = work_dir / original_name
@@ -736,6 +749,8 @@ class LauncherStructureGenerator:
             result["MoviePaths"] = movie_paths
         if image_paths:
             result["ImagePaths"] = image_paths
+        if pdf_paths:
+            result["PdfPaths"] = pdf_paths
 
         # 元のwork_fileフォルダが空になったら削除
         for work_file_path in work_files:
@@ -773,6 +788,8 @@ class LauncherStructureGenerator:
                 config["MoviePaths"] = file_info["MoviePaths"]
             if "ImagePaths" in file_info:
                 config["ImagePaths"] = file_info["ImagePaths"]
+            if "PdfPaths" in file_info:
+                config["PdfPaths"] = file_info["PdfPaths"]
             if work.play_time:
                 config["duration"] = work.play_time
 
@@ -786,7 +803,7 @@ class LauncherStructureGenerator:
                 normalized_config[key] = value
             elif isinstance(value, list):
                 # リスト内の文字列もパス区切り文字を変換（パス関連のキーのみ）
-                if key in ["MoviePaths", "ImagePaths"] or key.endswith("Paths"):
+                if key in ["MoviePaths", "ImagePaths", "PdfPaths"] or key.endswith("Paths"):
                     value = [item.replace("\\", "/") if isinstance(item, str) else item for item in value]
                 normalized_config[key] = value
             else:

@@ -413,6 +413,9 @@ async function generateWorkHtml(config, workDir) {
         // MoviePathsから動画コンテンツを生成
         const movieContent = await generateMovieContent(config.MoviePaths || []);
 
+        // PdfPathsからPDFコンテンツを生成
+        const pdfContent = await generatePdfContent(config.PdfPaths || []);
+
         // テンプレートに値を埋め込み
         return format(template, {
             title: config.title,
@@ -421,11 +424,31 @@ async function generateWorkHtml(config, workDir) {
             genre: config.genre || '',
             credit: config.credit ? config.credit.replace(/\\n/g, '\n') : '',
             imageContent: imageContent,
-            movieContent: movieContent
+            movieContent: movieContent,
+            pdfContent: pdfContent
         });
     } catch (error) {
         console.error('HTMLテンプレート生成エラー:', error);
         throw error;
+    }
+}
+
+// PDFコンテンツを生成する関数
+async function generatePdfContent(pdfPaths) {
+    if (!pdfPaths || pdfPaths.length === 0) {
+        return '';
+    }
+
+    try {
+        const templatePath = getResourcePath(path.join('templates', 'pdf-item-template.html'));
+        const template = await fs.readFile(templatePath, 'utf8');
+
+        return pdfPaths.map(pdfPath => {
+            return format(template, { pdfPath: pdfPath });
+        }).join('');
+    } catch (error) {
+        console.error('PDFコンテンツ生成エラー:', error);
+        return '';
     }
 }
 

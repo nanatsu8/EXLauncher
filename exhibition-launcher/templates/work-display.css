@@ -137,6 +137,36 @@ video {
     width: 100%;
 }
 
+/* PDFアイテム */
+.pdf-item {
+    margin: 20px 0;
+    width: 100%;
+    max-width: 1000px;
+}
+
+.pdf-viewer {
+    width: 100%;
+    height: min(78vh, 900px);
+    min-height: 620px;
+    border: 3px solid #c1c6ba;
+    border-radius: 8px;
+    background: #ffffff;
+}
+
+.pdf-fallback {
+    padding: 20px;
+    color: #000;
+    background: #ffffff;
+}
+
+.pdf-open-link {
+    display: inline-block;
+    margin-top: 12px;
+    color: #174a8b;
+    font-size: 1rem;
+    font-weight: 600;
+}
+
 /* 画像ギャラリー */
 .image-gallery {
     display: grid;
