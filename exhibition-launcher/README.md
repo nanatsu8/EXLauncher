@@ -6,7 +6,7 @@
 
 - 作品ごとの設定ファイル（config.json5）に基づいた自動読み込み
 - priority順での作品表示
-- exe実行とHTML作品表示の両方に対応
+- exe実行、HTML作品表示、PDF作品表示に対応
 - 美しいUI/UX
 
 ## フォルダ構造
@@ -69,13 +69,28 @@ launcher_electron/
 }
 ```
 
+### PDF作品の場合
+```json5
+{
+    "title": "PDF作品 - Work3",
+    "description": "PDF形式の作品です。",
+    "priority": 3,
+    "type": "html",
+    "PdfPaths": ["work3.pdf"],
+    "thumbnail": "thumbnail.jpg",
+    "author": "cc",
+    "genre": "資料作品",
+    "credit": "",
+}
+```
+
 ### 設定可能なフィールド
 
 #### 共通フィールド
 - `title`: 作品タイトル（必須）
 - `description`: 作品説明（改行は `\n` で指定可能）
 - `priority`: 表示順序（数値、小さいほど上に表示）
-- `type`: 作品タイプ（`"exe"` または `"html"`）
+- `type`: 作品タイプ（`"exe"` または `"html"`。PDF作品も `"html"` として表示）
 - `thumbnail`: サムネイル画像のファイル名
 - `author`: 制作者名
 - `genre`: ジャンル
@@ -88,6 +103,9 @@ launcher_electron/
 
 #### HTML作品固有フィールド
 - `htmlPath`: HTMLファイルのパス
+- `MoviePaths`: 表示する動画ファイルのパス配列
+- `ImagePaths`: 表示する画像ファイルのパス配列
+- `PdfPaths`: 表示するPDFファイルのパス配列
 
 ## 起動方法
 
@@ -122,6 +140,7 @@ npm run build
 - **ファイル形式**:
   - ゲーム: .exe
   - 映像/Web作品: HTML + CSS + JS + 動画ファイル
+  - PDF作品: .pdf
 
 ## トラブルシューティング
 
@@ -143,6 +162,10 @@ npm run build
 ### HTML作品が表示されない場合
 - index.htmlが存在するか確認
 - 関連ファイル（動画、画像等）のパスが正しいか確認
+
+### PDF作品が表示されない場合
+- `PdfPaths` に指定したPDFファイルが作品フォルダ内に存在するか確認
+- PDFファイル名やパスに誤りがないか確認
 
 ## ライセンス
 
