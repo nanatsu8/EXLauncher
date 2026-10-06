@@ -10,7 +10,7 @@ import sys
 import time
 import zipfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Dict, List, Optional
 
 import json5
@@ -22,6 +22,17 @@ from path_utils import resolve_config_path
 def get_runtime_base_dir() -> Path:
     """スクリプト実行時/EXE実行時で共通の基準ディレクトリを返す"""
     return _get_runtime_base_dir(__file__)
+
+
+def configure_console_output() -> None:
+    """CP932コンソールでも絵文字を含むログ出力で停止しないようにする。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
 
 
 @dataclass
@@ -40,6 +51,9 @@ class Config:
 
     # 作品タイプ判定
     exe_type_identifier: str = "ゲーム(.exe)"
+    local_html_type_identifiers: List[str] = field(
+        default_factory=lambda: ["ゲーム(.html)", "その他(.html)"]
+    )
 
     # デフォルト値
     default_thumbnail_path: str = "thumbnail/thumbnail.png"
@@ -459,17 +473,58 @@ class LauncherStructureGenerator:
         return f"{index:03d}-{sanitized_title}"
 
     def determine_work_type(self, work: WorkData) -> str:
-        """作品タイプを判定"""
-        if work.work_type == self.config.exe_type_identifier:
+        """ランチャー設定へ出力する作品タイプを判定"""
+        return "exe" if self.determine_processing_type(work) == "exe" else "html"
+
+    def determine_processing_type(self, work: WorkData) -> str:
+        """ビルド処理用に exe / local_html / media を判定"""
+        normalized_type = (work.work_type or "").strip()
+        if normalized_type == self.config.exe_type_identifier:
             return "exe"
-        else:
-            return "html"
+        if normalized_type in self.config.local_html_type_identifiers:
+            return "local_html"
+        return "media"
 
     def split_values(self, raw_value: str) -> List[str]:
         """区切り文字で分割して空要素を除外"""
         if not raw_value:
             return []
         return [v.strip() for v in raw_value.split(self.config.url_separator) if v.strip()]
+
+    def get_work_source_values(self, work: WorkData) -> List[str]:
+        """作品ファイルのローカル参照候補を取得する。"""
+        if work.work_file_name.strip():
+            work_path = self.mirror_root_dir / self.config.work_file_subdir / work.work_file_name.strip()
+            return [str(work_path)]
+        return self.split_values(work.work_file) or self.split_values(work.work_url)
+
+    @staticmethod
+    def _path_fingerprint(source_path: Path) -> str:
+        """ファイルまたはディレクトリ内容からSHA-256を生成する。"""
+        import hashlib
+
+        digest = hashlib.sha256()
+        files = [source_path] if source_path.is_file() else sorted(
+            (item for item in source_path.rglob("*") if item.is_file()),
+            key=lambda item: item.relative_to(source_path).as_posix().casefold(),
+        )
+        for file_path in files:
+            relative_name = file_path.name if source_path.is_file() else file_path.relative_to(source_path).as_posix()
+            digest.update(relative_name.encode("utf-8"))
+            digest.update(b"\0")
+            with open(file_path, "rb") as source:
+                while chunk := source.read(65536):
+                    digest.update(chunk)
+        return digest.hexdigest()
+
+    def get_local_html_source_fingerprint(self, work: WorkData) -> Optional[str]:
+        source_values = self.get_work_source_values(work)
+        if len(source_values) != 1 or re.match(r"^https?://", source_values[0], re.IGNORECASE):
+            return None
+        source_path = self.resolve_source_path(source_values[0])
+        if not source_path:
+            return None
+        return self._path_fingerprint(source_path)
 
     def resolve_source_path(self, raw_path: str) -> Optional[Path]:
         """CSVのパス文字列を実在パスへ解決"""
@@ -522,25 +577,85 @@ class LauncherStructureGenerator:
             except Exception as e:
                 print(f"削除失敗: {item} ({e})")
 
+    @staticmethod
+    def _zip_member_parts(member: zipfile.ZipInfo) -> Optional[List[str]]:
+        """ZIPメンバーを安全な相対パスへ正規化する。不要なメタデータは除外する。"""
+        raw_name = member.filename.replace("\\", "/")
+        if not raw_name or raw_name.startswith("/") or re.match(r"^[A-Za-z]:", raw_name):
+            raise ValueError(f"ZIP内に不正なパスがあります: {member.filename}")
+
+        pure_path = PurePosixPath(raw_name)
+        parts = [part for part in pure_path.parts if part not in {"", "."}]
+        if not parts or any(part == ".." for part in parts):
+            raise ValueError(f"ZIP内に展開先外を指すパスがあります: {member.filename}")
+
+        unix_mode = (member.external_attr >> 16) & 0xFFFF
+        if stat.S_ISLNK(unix_mode):
+            raise ValueError(f"ZIP内のシンボリックリンクは使用できません: {member.filename}")
+
+        if "__MACOSX" in parts or parts[-1] == ".DS_Store":
+            return None
+
+        return parts
+
+    def _extract_zip_to_directory(self, zip_path: Path, extract_dir: Path) -> None:
+        """ZIPを検証し、指定ディレクトリ内だけへ展開する。"""
+        extract_root = extract_dir.resolve()
+        seen_targets = set()
+
+        with zipfile.ZipFile(zip_path, "r") as zip_ref:
+            for member in zip_ref.infolist():
+                if member.flag_bits & 0x1:
+                    raise ValueError(f"暗号化されたZIPメンバーは使用できません: {member.filename}")
+
+                parts = self._zip_member_parts(member)
+                if parts is None:
+                    continue
+
+                collision_key = "/".join(part.rstrip(" .").casefold() for part in parts)
+                if collision_key in seen_targets and not member.is_dir():
+                    raise ValueError(f"ZIP内で同じパスが重複しています: {member.filename}")
+                seen_targets.add(collision_key)
+
+                destination = extract_dir.joinpath(*parts)
+                resolved_destination = destination.resolve()
+                try:
+                    resolved_destination.relative_to(extract_root)
+                except ValueError as error:
+                    raise ValueError(f"ZIP内に展開先外を指すパスがあります: {member.filename}") from error
+
+                if member.is_dir():
+                    destination.mkdir(parents=True, exist_ok=True)
+                    continue
+
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with zip_ref.open(member, "r") as source, open(destination, "wb") as target:
+                    shutil.copyfileobj(source, target)
+
     def _extract_zip_file(self, zip_path: Path) -> bool:
-        """ZIPファイルを展開"""
+        """従来作品向けにZIPを安全にwork_fileへ展開"""
+        work_dir = zip_path.parent
+        extract_dir = work_dir / self.config.work_file_folder_name
+        temp_extract_dir = work_dir / f".{self.config.work_file_folder_name}.extracting"
         try:
-            work_dir = zip_path.parent
-            extract_dir = work_dir / self.config.work_file_folder_name
-            extract_dir.mkdir(exist_ok=True)
+            if temp_extract_dir.exists():
+                self._rmtree_with_retry(temp_extract_dir)
+            temp_extract_dir.mkdir(parents=True)
 
             print(f"ZIPファイルを展開中: {zip_path.name}")
-            with zipfile.ZipFile(zip_path, "r") as zip_ref:
-                zip_ref.extractall(extract_dir)
+            self._extract_zip_to_directory(zip_path, temp_extract_dir)
+
+            if extract_dir.exists():
+                self._rmtree_with_retry(extract_dir)
+            temp_extract_dir.replace(extract_dir)
 
             print(f"展開完了: {extract_dir}")
             self._cleanup_extraneous_work_files(work_dir)
             return True
-        except zipfile.BadZipFile:
-            print(f"エラー: {zip_path} は無効なZIPファイルです")
-            return False
         except Exception as e:
             print(f"ZIP展開エラー: {e}")
+            if temp_extract_dir.exists():
+                self._rmtree_with_retry(temp_extract_dir)
             return False
 
     def copy_sources(
@@ -574,7 +689,10 @@ class LauncherStructureGenerator:
                 else:
                     shutil.copy2(source_path, destination)
                     if destination.suffix.lower() == ".zip":
-                        self._extract_zip_file(destination)
+                        if not self._extract_zip_file(destination):
+                            if destination.exists():
+                                destination.unlink()
+                            continue
 
                 success_count += 1
                 print(f"コピー完了: {source_path} -> {destination}")
@@ -582,6 +700,106 @@ class LauncherStructureGenerator:
                 print(f"コピー失敗: {source_path} ({e})")
 
         return success_count == len(source_values)
+
+    @staticmethod
+    def _find_html_entry(site_dir: Path) -> Path:
+        """フォームに入口質問を増やさず、決定的な規則で入口HTMLを選ぶ。"""
+
+        def is_html(file_path: Path) -> bool:
+            return file_path.is_file() and file_path.suffix.lower() in {".html", ".htm"}
+
+        direct_indexes = [
+            item for item in site_dir.iterdir()
+            if is_html(item) and item.name.lower() in {"index.html", "index.htm"}
+        ]
+        if len(direct_indexes) == 1:
+            return direct_indexes[0]
+        if len(direct_indexes) > 1:
+            raise ValueError("ZIP直下に入口HTMLが複数あります。index.htmlを1つにしてください。")
+
+        visible_children = [item for item in site_dir.iterdir() if not item.name.startswith(".")]
+        top_level_dirs = [item for item in visible_children if item.is_dir()]
+        top_level_files = [item for item in visible_children if item.is_file()]
+        if len(top_level_dirs) == 1 and not top_level_files:
+            wrapper_indexes = [
+                item for item in top_level_dirs[0].iterdir()
+                if is_html(item) and item.name.lower() in {"index.html", "index.htm"}
+            ]
+            if len(wrapper_indexes) == 1:
+                return wrapper_indexes[0]
+
+        html_files = sorted(
+            (item for item in site_dir.rglob("*") if is_html(item)),
+            key=lambda item: item.relative_to(site_dir).as_posix().casefold(),
+        )
+        index_files = [item for item in html_files if item.name.lower() in {"index.html", "index.htm"}]
+        if len(index_files) == 1:
+            return index_files[0]
+        if not index_files and len(html_files) == 1:
+            return html_files[0]
+        if not html_files:
+            raise ValueError("HTML作品内に .html ファイルがありません。")
+        raise ValueError("入口HTMLを特定できません。入口をindex.htmlにしてください。")
+
+    def prepare_local_html_sources(
+        self, source_values: List[str], work_dir: Path, work: WorkData
+    ) -> tuple[bool, Dict[str, str]]:
+        """ローカルHTML作品を階層を保ったままwork_fileへ配置する。"""
+        target_dir = work_dir / self.config.work_file_folder_name
+        temp_dir = work_dir / f".{self.config.work_file_folder_name}.preparing"
+
+        if len(source_values) != 1:
+            print(f"警告: {work.title} のHTML作品ファイルは1個だけ指定してください")
+            return False, {}
+
+        raw_value = source_values[0].strip()
+        if re.match(r"^https?://", raw_value, re.IGNORECASE):
+            print(f"警告: 公開URLはHTML作品として使用できません: {raw_value}")
+            return False, {}
+
+        source_path = self.resolve_source_path(raw_value)
+        if not source_path:
+            self.manual_tasks.append(
+                {
+                    "type": "HTML作品ファイル",
+                    "work_title": work.title,
+                    "source": raw_value,
+                    "save_path": str(target_dir),
+                }
+            )
+            print(f"警告: HTML作品のソースが見つかりません: {raw_value}")
+            return False, {}
+
+        try:
+            if temp_dir.exists():
+                self._rmtree_with_retry(temp_dir)
+            temp_dir.mkdir(parents=True)
+
+            if source_path.is_dir():
+                shutil.copytree(source_path, temp_dir, dirs_exist_ok=True)
+            elif source_path.suffix.lower() == ".zip":
+                self._extract_zip_to_directory(source_path, temp_dir)
+            elif source_path.suffix.lower() in {".html", ".htm"}:
+                shutil.copy2(source_path, temp_dir / source_path.name)
+            else:
+                raise ValueError("HTML作品は単一HTMLまたはZIPで提出してください。")
+
+            entry_path = self._find_html_entry(temp_dir)
+            entry_relative_to_site = entry_path.relative_to(temp_dir)
+
+            if target_dir.exists():
+                self._rmtree_with_retry(target_dir)
+            temp_dir.replace(target_dir)
+            self._cleanup_extraneous_work_files(work_dir)
+
+            html_path = (Path(self.config.work_file_folder_name) / entry_relative_to_site).as_posix()
+            print(f"HTML作品を配置しました: {html_path}")
+            return True, {"displayMode": "local-html", "htmlPath": html_path}
+        except Exception as e:
+            print(f"HTML作品の処理に失敗しました: {e}")
+            if temp_dir.exists():
+                self._rmtree_with_retry(temp_dir)
+            return False, {}
 
     def extract_and_organize_files(self, work_dir: Path, work: WorkData) -> Dict[str, str]:
         """コピーしたファイルを適切に配置し、設定情報を返す"""
@@ -599,10 +817,13 @@ class LauncherStructureGenerator:
             print(f"警告: {work.title} に作品ファイルが見つかりません")
             return {}
 
-        work_type = self.determine_work_type(work)
+        work_type = self.determine_processing_type(work)
 
         if work_type == "exe":
             return self._handle_exe_file(work_dir, work, work_files)
+        elif work_type == "local_html":
+            print(f"警告: {work.title} のHTML作品は専用処理を通す必要があります")
+            return {}
         else:
             return self._handle_media_file(work_dir, work)
 
@@ -733,16 +954,8 @@ class LauncherStructureGenerator:
                     pdf_paths.append(original_name)
 
             else:
-                # その他のファイル形式（元のファイル名を保持）
-                target_path = work_dir / original_name
-
-                # 移動先に同名ファイルがないか確認
-                if target_path.exists():
-                    print(f"スキップ: {original_name} は既に存在します")
-                    result["htmlPath"] = original_name
-                else:
-                    file_path.rename(target_path)
-                    result["htmlPath"] = original_name
+                # HTML作品は専用処理を通すため、メディア作品内のその他形式は分類しない
+                print(f"情報: メディア分類対象外のファイルを保持します: {file_path.name}")
 
         # 結果を設定
         if movie_paths:
@@ -762,6 +975,10 @@ class LauncherStructureGenerator:
     def generate_config_json5(self, work: WorkData, priority: int, file_info: Dict[str, str]) -> str:
         """config.json5の内容を生成"""
         work_type = self.determine_work_type(work)
+        processing_type = self.determine_processing_type(work)
+        visible_value = file_info.get("visible", False)
+        if isinstance(visible_value, str):
+            visible_value = visible_value.strip().lower() == "true"
 
         config = {
             "title": work.title,
@@ -772,13 +989,24 @@ class LauncherStructureGenerator:
             "author": work.handle_name,
             "genre": work.genre or self.config.default_genre,
             "credit": work.credit.replace("\n", "\\n") if work.credit else "",
-            "visible": file_info.get("visible", False),
+            "visible": bool(visible_value),
         }
 
         # 作品タイプに応じた追加設定
-        if work_type == "exe":
+        if processing_type == "exe":
             if "executablePath" in file_info:
                 config["executablePath"] = file_info["executablePath"]
+            if work.control_type:
+                config["operation"] = work.control_type
+            if work.play_time:
+                config["estimatedPlayTime"] = work.play_time
+        elif processing_type == "local_html":
+            config["buildSchemaVersion"] = 2
+            if "htmlPath" in file_info:
+                config["displayMode"] = "local-html"
+                config["htmlPath"] = file_info["htmlPath"]
+            if "sourceFingerprint" in file_info:
+                config["sourceFingerprint"] = file_info["sourceFingerprint"]
             if work.control_type:
                 config["operation"] = work.control_type
             if work.play_time:
@@ -852,14 +1080,35 @@ class LauncherStructureGenerator:
                 # フォルダ名を生成
                 folder_name = self.generate_folder_name(actual_index, work.title)
                 work_dir = self.download_dir / folder_name
+                processing_type = self.determine_processing_type(work)
+                local_html_fingerprint = (
+                    self.get_local_html_source_fingerprint(work)
+                    if processing_type == "local_html"
+                    else None
+                )
 
                 # 差分比較: 前回のデータと同じ、かつフォルダが存在する場合はスキップ
-                if (
+                can_skip = (
                     self.config.use_incremental_build
                     and index <= len(old_works)
                     and work == old_works[index - 1]
                     and work_dir.exists()
-                ):
+                )
+                if can_skip and processing_type == "local_html":
+                    try:
+                        existing_config = json5.loads(
+                            (work_dir / self.config.config_file_name).read_text(encoding="utf-8")
+                        )
+                        can_skip = (
+                            existing_config.get("buildSchemaVersion") == 2
+                            and existing_config.get("displayMode") == "local-html"
+                            and existing_config.get("sourceFingerprint") == local_html_fingerprint
+                            and bool(local_html_fingerprint)
+                        )
+                    except Exception:
+                        can_skip = False
+
+                if can_skip:
                     print(f"情報: 変更がないためスキップします ({index}/{total_count}): {work.title}")
                     success_count += 1
                     continue
@@ -892,33 +1141,27 @@ class LauncherStructureGenerator:
                     if files:
                         thumbnail_filename = f"{self.config.thumbnail_folder_name}/{files[0].name}"
 
-                if work.work_file_name.strip():
-                    work_path = (
-                        self.mirror_root_dir / self.config.work_file_subdir / work.work_file_name.strip()
+                work_file_values = self.get_work_source_values(work)
+                if processing_type == "local_html":
+                    work_file_success, file_info = self.prepare_local_html_sources(
+                        work_file_values, work_dir, work
                     )
-                    work_file_values = [str(work_path)]
+                    if work_file_success and local_html_fingerprint:
+                        file_info["sourceFingerprint"] = local_html_fingerprint
                 else:
-                    work_file_values = self.split_values(work.work_file) or self.split_values(work.work_url)
-                work_file_success = self.copy_sources(work_file_values, work_dir, "作品ファイル", work)
+                    work_file_success = self.copy_sources(work_file_values, work_dir, "作品ファイル", work)
+                    file_info = {}
 
-                # ファイルを適切に配置（既存ファイルがある場合も情報を取得）
-                file_info = {}
-
-                # 作品ファイルが存在する場合（新規ダウンロード or 既存ファイル）
-                all_files = list(work_dir.glob("*"))
-                work_files = [
-                    f
-                    for f in all_files
-                    if f.name not in [self.config.config_file_name]
-                    and not f.name.startswith(self.config.thumbnail_folder_name)
-                    and f.name != self.config.thumbnail_folder_name
-                ]
-
-                # thumbnailフォルダは除外
-                work_files = [f for f in work_files if f.name != self.config.thumbnail_folder_name]
-
-                if work_files or work_file_success:
-                    file_info = self.extract_and_organize_files(work_dir, work)
+                    # 作品ファイルが存在する場合（新規コピーまたは既存ファイル）
+                    work_files = [
+                        file_path
+                        for file_path in work_dir.glob("*")
+                        if file_path.name != self.config.config_file_name
+                        and file_path.name != self.config.thumbnail_folder_name
+                        and not file_path.name.startswith(".")
+                    ]
+                    if work_files or work_file_success:
+                        file_info = self.extract_and_organize_files(work_dir, work)
 
                 # サムネイル情報を追加
                 if thumbnail_filename:
@@ -929,7 +1172,10 @@ class LauncherStructureGenerator:
                     print(f"情報: show_in_launcher=0 のため非表示として生成します ({work.title})")
 
                 # visible状態を追加（show_in_launcher=1 かつ必要ファイルが揃う場合のみ true）
-                file_info["visible"] = str(should_show and thumbnail_success and work_file_success)
+                content_ready = work_file_success
+                if processing_type == "local_html":
+                    content_ready = content_ready and bool(file_info.get("htmlPath"))
+                file_info["visible"] = bool(should_show and thumbnail_success and content_ready)
 
                 priority_value = self.data_client.parse_priority(work.priority, actual_index)
 
@@ -951,9 +1197,6 @@ class LauncherStructureGenerator:
 
             # ファイル名未入力の行がある場合、シート貼り付け用一覧を出力
             self.show_file_name_hints(works)
-
-            # ステージング内のマニフェストを生成
-            self.write_manifest()
 
             # CSVをコピー（次回の比較用）
             shutil.copy2(self.config.csv_input_path, old_csv_path)
@@ -1169,6 +1412,7 @@ class LauncherStructureGenerator:
 
 def main():
     """CSVからランチャー構造を生成するメイン処理"""
+    configure_console_output()
     try:
         # 設定読み込み
         config = Config.from_file()

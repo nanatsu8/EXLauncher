@@ -5,6 +5,9 @@
     "scripts": {
         "start": "electron .",
         "dev": "electron . --dev",
+        "test": "node --test test/*.test.js",
+        "fixture:install": "node scripts/local-html-fixture.js install",
+        "fixture:remove": "node scripts/local-html-fixture.js remove",
         "build": "electron-builder --win",
         "build:portable": "electron-builder --win --config.win.target=portable"
     },
@@ -26,7 +29,9 @@
         "icon": "assets/kswl-logo256.ico",
         "files": [
             "main.js",
-            "preload.js"
+            "preload.js",
+            "work-display-preload.js",
+            "local-html-server.js"
         ],
         "extraResources": [
             {

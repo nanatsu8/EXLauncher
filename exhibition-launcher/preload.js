@@ -9,13 +9,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getWorks: () => ipcRenderer.invoke('get-works'),
 
     // exe実行
-    launchExe: (workId, executablePath) => ipcRenderer.invoke('launch-exe', workId, executablePath),
+    launchExe: (workId) => ipcRenderer.invoke('launch-exe', workId),
 
     // HTML作品を表示
-    showHtmlWork: (workId, htmlPath) => ipcRenderer.invoke('show-html-work', workId, htmlPath),
+    showHtmlWork: (workId) => ipcRenderer.invoke('show-html-work', workId),
 
     // 画像をBase64で取得
-    getImageBase64: (imagePath) => ipcRenderer.invoke('get-image-base64', imagePath),
+    getImageBase64: (workId) => ipcRenderer.invoke('get-image-base64', workId),
 
     // 作品カードHTMLを生成
     generateWorkCardHtml: (work, thumbnailSrc) => ipcRenderer.invoke('generate-work-card-html', work, thumbnailSrc),

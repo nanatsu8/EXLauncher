@@ -1,0 +1,13 @@
+{
+    title: "ローカルHTML動作確認",
+    description: "CSS・JavaScript・JSON・画像・ページ遷移を確認する仮作品です。",
+    priority: 9999,
+    type: "html",
+    displayMode: "local-html",
+    htmlPath: "site/index.html",
+    thumbnail: "thumbnail.svg",
+    author: "Launcher Test",
+    genre: "動作確認",
+    credit: "外部通信を使用しないテスト作品",
+    visible: true
+}

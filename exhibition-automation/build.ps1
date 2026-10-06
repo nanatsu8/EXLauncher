@@ -28,4 +28,12 @@ foreach ($target in $targets) {
 	}
 }
 
-Write-Host "すべてのビルドが完了しました。出力先: .\dist"
+Write-Host "実行用EXEをスクリプト直下へ反映します..."
+foreach ($target in $targets) {
+	$exeName = [System.IO.Path]::GetFileNameWithoutExtension($target) + ".exe"
+	$builtExe = Join-Path ".\dist" $exeName
+	$runtimeExe = Join-Path "." $exeName
+	Copy-Item -LiteralPath $builtExe -Destination $runtimeExe -Force
+}
+
+Write-Host "すべてのビルドと実行用EXEの更新が完了しました。出力先: .\dist およびスクリプト直下"

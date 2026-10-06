@@ -57,17 +57,21 @@ launcher_electron/
 ### HTML作品の場合
 ```json5
 {
-    "title": "映像作品 - Work2",
-    "description": "部活動で制作した映像作品です。\n美しい映像と音楽をお楽しみください。",
+    "title": "ローカルWeb作品",
+    "description": "ローカルファイルだけで動作するWeb作品です。",
     "priority": 2,
     "type": "html",
-    "htmlPath": "index.html",
+    "displayMode": "local-html",
+    "htmlPath": "work_file/site/index.html",
     "thumbnail": "thumbnail.jpg",
-    "author": "aa, bb",
-    "genre": "映像作品",
-    "credit": "制作\n企画・演出: aa\n撮影・編集: bb\n\n音楽\nフリー音楽素材 MusMus\nhttps://musmus.main.jp/",
+    "author": "aa",
+    "genre": "Web",
+    "credit": "",
+    "visible": true,
 }
 ```
+
+HTML作品はカードの「サイトを開く」ボタンから専用ウィンドウで開きます。`127.0.0.1` の一時サーバーを使用しますが、外部には公開されません。作品から外部サイトや外部APIへの通信は許可されません。
 
 ### PDF作品の場合
 ```json5
@@ -102,10 +106,13 @@ launcher_electron/
 - `estimatedPlayTime`: 推定プレイ時間
 
 #### HTML作品固有フィールド
-- `htmlPath`: HTMLファイルのパス
+- `displayMode`: ローカルWeb作品では `"local-html"`
+- `htmlPath`: 作品フォルダを基準にした入口HTMLの相対パス
 - `MoviePaths`: 表示する動画ファイルのパス配列
 - `ImagePaths`: 表示する画像ファイルのパス配列
 - `PdfPaths`: 表示するPDFファイルのパス配列
+
+`htmlPath` がある作品はHTMLサイトを直接表示し、ない作品は動画・画像・PDF用の作品紹介画面を表示します。
 
 ## 起動方法
 
@@ -124,6 +131,20 @@ npm start
 npm run build
 ```
 
+### テストと確認用HTML作品
+
+```powershell
+npm test
+npm run fixture:install
+npm start
+```
+
+確認後は仮作品を削除してください。仮作品を配置したままビルドすると配布物にも含まれます。
+
+```powershell
+npm run fixture:remove
+```
+
 ## 新しい作品の追加方法
 
 1. `works/` フォルダに新しいフォルダを作成
@@ -131,6 +152,14 @@ npm run build
 3. `config.json5` を作成し、必要な情報を記入
 4. `thumbnail.jpg` サムネイル画像を配置
 5. アプリを再起動
+
+フォームの「ゲーム(.html)」「その他(.html)」では、次の形式だけを受け付けます。
+
+- 外部素材を使わない単一の `.html`
+- `index.html` とCSS、JavaScript、画像などをまとめた `.zip`
+- ReactやViteなどの場合は、ソースではなくビルド済みの成果物
+
+公開URL、ログイン、サーバー処理、データベース、外部APIを必要とする作品には対応しません。複数ページを含むZIPは入口を `index.html` にしてください。
 
 ## 技術仕様
 
@@ -160,8 +189,10 @@ npm run build
 - セキュリティソフトによるブロックがないか確認
 
 ### HTML作品が表示されない場合
-- index.htmlが存在するか確認
-- 関連ファイル（動画、画像等）のパスが正しいか確認
+- `displayMode` が `local-html` になっているか確認
+- `htmlPath` の入口HTMLが存在するか確認
+- CSS、JavaScript、画像などがZIP内に含まれているか確認
+- 外部URLや外部APIに依存していないか確認
 
 ### PDF作品が表示されない場合
 - `PdfPaths` に指定したPDFファイルが作品フォルダ内に存在するか確認

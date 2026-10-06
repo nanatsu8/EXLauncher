@@ -25,6 +25,17 @@ CONFIG_FILE = "config.json5"
 MANIFEST_FILE = "manifest.json"
 
 
+def configure_console_output() -> None:
+    """CP932コンソールでもUnicodeを含むログ出力で停止しないようにする。"""
+    for stream in (sys.stdout, sys.stderr):
+        reconfigure = getattr(stream, "reconfigure", None)
+        if callable(reconfigure):
+            try:
+                reconfigure(errors="replace")
+            except (OSError, ValueError):
+                pass
+
+
 # ---------------------------------------------------------------------------
 # 設定読み込み
 # ---------------------------------------------------------------------------
@@ -382,6 +393,7 @@ def cmd_apply(staging_dir: Path, works_dir: Path, backup_dir: Path) -> None:
 
 
 def main() -> int:
+    configure_console_output()
     script_dir = str(get_runtime_base_dir(__file__))
     os.chdir(script_dir)
     print(f"作業ディレクトリ: {script_dir}")

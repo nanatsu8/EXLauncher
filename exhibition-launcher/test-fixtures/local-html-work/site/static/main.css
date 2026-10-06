@@ -1,0 +1,45 @@
+:root {
+    color-scheme: dark;
+    font-family: system-ui, sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+}
+
+body {
+    min-height: 100vh;
+    margin: 0;
+    display: grid;
+    place-items: center;
+}
+
+.card {
+    width: min(680px, calc(100% - 48px));
+    padding: 40px;
+    border: 3px solid #22c55e;
+    border-radius: 24px;
+    background: #172554;
+    text-align: center;
+}
+
+.ok {
+    color: #86efac;
+    font-weight: 700;
+}
+
+.pending {
+    color: #fde68a;
+}
+
+button,
+a {
+    display: inline-block;
+    margin: 8px;
+    padding: 12px 18px;
+    border: 0;
+    border-radius: 10px;
+    background: #2563eb;
+    color: white;
+    font: inherit;
+    text-decoration: none;
+    cursor: pointer;
+}

@@ -1,9 +1,15 @@
-const { app, BrowserWindow, ipcMain, shell } = require('electron');
+const { app, BrowserWindow, ipcMain } = require('electron');
+const { randomUUID } = require('crypto');
 const path = require('path');
 const fs = require('fs').promises;
 const { execFile } = require('child_process');
 const JSON5 = require('json5');
 const log = require('electron-log');
+const {
+    createStaticWorkServer,
+    resolveExistingPathInside,
+    resolveHtmlEntry
+} = require('./local-html-server');
 
 const defaultLoggingConfig = {
     level: 'silly',
@@ -112,6 +118,7 @@ function createErrorResponse(operation, error, options = {}) {
 
 let mainWindow;
 let appConfig;
+const activeLocalHtmlWorks = new Map();
 
 // リソースディレクトリのパスを取得する関数
 function getResourcePath(relativePath) {
@@ -122,6 +129,26 @@ function getResourcePath(relativePath) {
         // 開発時：プロジェクトディレクトリから読み込み
         return path.join(__dirname, relativePath);
     }
+}
+
+function getWorksDirectoryPath() {
+    const worksPath = appConfig?.worksDirectory || 'works';
+    return path.isAbsolute(worksPath) ? worksPath : getResourcePath(worksPath);
+}
+
+async function resolveWorkDirectory(workId) {
+    return resolveExistingPathInside(getWorksDirectoryPath(), workId, { directoryOnly: true });
+}
+
+function shouldOpenLocalHtml(config) {
+    return config?.type === 'html'
+        && (config.displayMode === 'local-html' || (!config.displayMode && Boolean(config.htmlPath)));
+}
+
+function shouldMaximizeWorkWindow(config) {
+    return typeof config?.startMaximized !== 'undefined'
+        ? config.startMaximized === true
+        : appConfig?.startMaximized === true;
 }
 
 // テンプレート用のformat関数
@@ -211,6 +238,13 @@ app.on('window-all-closed', () => {
     }
 });
 
+app.on('before-quit', () => {
+    for (const activeWork of activeLocalHtmlWorks.values()) {
+        activeWork.closeServer();
+    }
+    activeLocalHtmlWorks.clear();
+});
+
 app.on('activate', async () => {
     if (BrowserWindow.getAllWindows().length === 0) {
         await createWindow();
@@ -244,14 +278,9 @@ ipcMain.handle('get-works', async () => {
                     const configData = await fs.readFile(configPath, 'utf8');
                     const config = JSON5.parse(configData);
 
-                    // サムネイルのパスを絶対パスに変換
-                    const thumbnailPath = path.join(folderPath, config.thumbnail);
-
                     works.push({
                         ...config,
-                        workId: folder,
-                        thumbnailPath: thumbnailPath,
-                        folderPath: folderPath
+                        workId: folder
                     });
                 } catch (error) {
                     console.error(`設定ファイル読み込みエラー (${folder}):`, error);
@@ -276,12 +305,15 @@ ipcMain.handle('get-works', async () => {
 });
 
 // exe実行
-ipcMain.handle('launch-exe', async (event, workId, executablePath) => {
+ipcMain.handle('launch-exe', async (_event, workId) => {
     try {
-        const worksPath = appConfig?.worksDirectory || 'works';
-        const worksDir = path.isAbsolute(worksPath) ? worksPath : getResourcePath(worksPath);
-        const workDir = path.join(worksDir, workId);
-        const fullExePath = path.join(workDir, executablePath);
+        const workDir = await resolveWorkDirectory(workId);
+        const configData = await fs.readFile(path.join(workDir, 'config.json5'), 'utf8');
+        const config = JSON5.parse(configData);
+        if (config.type !== 'exe') {
+            throw Object.assign(new Error('EXE作品ではない設定が指定されました。'), { code: 'INVALID_WORK_TYPE' });
+        }
+        const fullExePath = await resolveExistingPathInside(workDir, config.executablePath, { fileOnly: true });
 
         return new Promise((resolve) => {
             execFile(fullExePath, { cwd: path.dirname(fullExePath) }, (error) => {
@@ -302,100 +334,189 @@ ipcMain.handle('launch-exe', async (event, workId, executablePath) => {
         return createErrorResponse('exe起動', error, {
             userMessage: '作品を起動できませんでした。',
             recoveryHint: '実行ファイルの場所と権限を確認してから再実行してください。',
-            context: { workId, executablePath }
+            context: { workId }
         });
     }
 });
 
-// HTML作品表示（ポップアップウィンドウで表示）
-ipcMain.handle('show-html-work', async (event, workId) => {
-    try {
-        const worksPath = appConfig?.worksDirectory || 'works';
-        const worksDir = path.isAbsolute(worksPath) ? worksPath : getResourcePath(worksPath);
-        const workDir = path.join(worksDir, workId);
-        const configPath = path.join(workDir, 'config.json5');
-        const displayHtmlPath = path.join(workDir, 'work_display.html');
+async function openGeneratedWorkDisplay(config, workDir, workId) {
+    const displayHtmlPath = path.join(workDir, 'work_display.html');
+    const rootHandlingMode = appConfig?.workDisplayHandlingMode || 'overwrite';
+    const workHandlingMode = config?.workDisplayHandlingMode || rootHandlingMode;
+    let shouldCreateFile = true;
 
-        // 設定を読み込み
-        const configData = await fs.readFile(configPath, 'utf8');
-        const config = JSON5.parse(configData);
+    console.log(`work_display.html 処理モード: ${workHandlingMode} (${workId})`);
+    if (workHandlingMode === 'reuse') {
+        try {
+            await fs.access(displayHtmlPath);
+            console.log(`work_display.html が既に存在します (${workId}): 再利用します`);
+            shouldCreateFile = false;
+        } catch (_error) {
+            console.log(`work_display.html が存在しません (${workId}): 新規作成します`);
+        }
+    }
 
-        // アプリ設定による処理分岐
-        const rootHandlingMode = appConfig?.workDisplayHandlingMode || 'overwrite';
-        // 作品設定があればそれを優先、なければアプリ設定を使用
-        const workHandlingMode = config?.workDisplayHandlingMode || rootHandlingMode;
-        let shouldCreateFile = true;
+    if (shouldCreateFile) {
+        const htmlContent = await generateWorkHtml(config, workDir);
+        await fs.writeFile(displayHtmlPath, htmlContent, 'utf8');
+    }
 
-        // tempHandlingModeをデバッグ出力
-        console.log(`work_display.html 処理モード: ${workHandlingMode} (${workId})`);
+    const workWindow = new BrowserWindow({
+        width: 950,
+        height: 710,
+        parent: mainWindow,
+        modal: false,
+        show: false,
+        webPreferences: {
+            preload: path.join(__dirname, 'work-display-preload.js'),
+            nodeIntegration: false,
+            contextIsolation: true,
+            webSecurity: false
+        },
+        icon: path.join(__dirname, appConfig.icon)
+    });
 
-        if (workHandlingMode === 'reuse') {
-            // work_display.htmlが既に存在するかチェック
-            try {
-                await fs.access(displayHtmlPath);
-                console.log(`work_display.html が既に存在します (${workId}): 再利用します`);
-                shouldCreateFile = false;
-            } catch (error) {
-                console.log(`work_display.html が存在しません (${workId}): 新規作成します`);
-                shouldCreateFile = true;
+    workWindow.setTitle(config.title || '作品表示');
+    await workWindow.loadFile(displayHtmlPath);
+    if (shouldMaximizeWorkWindow(config)) {
+        workWindow.maximize();
+    }
+    workWindow.show();
+    workWindow.on('closed', () => {
+        console.log(`作品ウィンドウが閉じられました: ${config.title}`);
+    });
+}
+
+function configureLocalHtmlWindowSecurity(workWindow, allowedOrigin) {
+    const workSession = workWindow.webContents.session;
+    workSession.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+    workSession.setPermissionCheckHandler(() => false);
+    workSession.on('will-download', (event) => event.preventDefault());
+    workSession.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
+        let allowed = false;
+        try {
+            const requestUrl = new URL(details.url);
+            allowed = requestUrl.origin === allowedOrigin
+                || requestUrl.protocol === 'data:'
+                || requestUrl.protocol === 'blob:';
+        } catch (_error) {
+            allowed = false;
+        }
+        callback({ cancel: !allowed });
+    });
+
+    const preventExternalNavigation = (event, targetUrl) => {
+        try {
+            if (new URL(targetUrl).origin !== allowedOrigin) {
+                event.preventDefault();
             }
-        } else {
-            console.log(`work_display.html を上書きします (${workId})`);
-            shouldCreateFile = true;
+        } catch (_error) {
+            event.preventDefault();
         }
+    };
+    workWindow.webContents.on('will-navigate', preventExternalNavigation);
+    workWindow.webContents.on('will-redirect', preventExternalNavigation);
+    workWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+}
 
-        // 必要に応じてHTMLファイルを作成
-        if (shouldCreateFile) {
-            const htmlContent = await generateWorkHtml(config, workDir);
-            await fs.writeFile(displayHtmlPath, htmlContent, 'utf8');
+async function openLocalHtmlWork(config, workDir, workId) {
+    const current = activeLocalHtmlWorks.get(workId);
+    if (current && !current.window.isDestroyed()) {
+        if (current.window.isMinimized()) {
+            current.window.restore();
         }
+        current.window.show();
+        current.window.focus();
+        return;
+    }
 
-        // 新しいポップアップウィンドウで作品を表示
-        const workWindow = new BrowserWindow({
+    const htmlEntry = await resolveHtmlEntry(workDir, config.htmlPath);
+    const siteRoot = path.dirname(htmlEntry);
+    const staticServer = await createStaticWorkServer(siteRoot);
+    const partition = `local-html-${randomUUID()}`;
+    let workWindow;
+    try {
+        workWindow = new BrowserWindow({
             width: 950,
             height: 710,
-            parent: mainWindow, // メインウィンドウを親として設定
-            modal: false, // モーダルにしない（背景操作可能）
+            parent: mainWindow,
+            modal: false,
             show: false,
             webPreferences: {
-                preload: path.join(__dirname, 'preload.js'),
                 nodeIntegration: false,
                 contextIsolation: true,
-                webSecurity: false
+                sandbox: true,
+                webSecurity: true,
+                partition,
+                backgroundThrottling: false
             },
             icon: path.join(__dirname, appConfig.icon)
         });
+    } catch (error) {
+        staticServer.close();
+        throw error;
+    }
 
-        // ウィンドウにタイトルを設定
-        workWindow.setTitle(config.title || '作品表示');
+    let cleanedUp = false;
+    const cleanup = () => {
+        if (cleanedUp) {
+            return;
+        }
+        cleanedUp = true;
+        activeLocalHtmlWorks.delete(workId);
+        staticServer.close();
+    };
 
-        // HTMLファイルを読み込み
-        await workWindow.loadFile(displayHtmlPath);
+    activeLocalHtmlWorks.set(workId, { window: workWindow, closeServer: cleanup });
+    configureLocalHtmlWindowSecurity(workWindow, staticServer.origin);
+    workWindow.setTitle(config.title || 'HTML作品');
+    workWindow.on('closed', () => {
+        cleanup();
+        console.log(`HTML作品ウィンドウが閉じられました: ${config.title}`);
+    });
 
-        // ウィンドウを表示
-        // 起動時に作品表示ウィンドウを最大化するか判定（作品設定が優先）
-        const popupStartMaximized = (config && typeof config.startMaximized !== 'undefined')
-            ? config.startMaximized === true
-            : (appConfig && appConfig.startMaximized === true);
+    const entryUrl = `${staticServer.origin}/${encodeURIComponent(path.basename(htmlEntry))}`;
+    try {
+        await workWindow.loadURL(entryUrl);
+    } catch (error) {
+        cleanup();
+        if (!workWindow.isDestroyed()) {
+            workWindow.destroy();
+        }
+        throw error;
+    }
 
-        if (popupStartMaximized) {
-            workWindow.maximize();
+    if (shouldMaximizeWorkWindow(config)) {
+        workWindow.maximize();
+    }
+    workWindow.show();
+}
+
+// HTML作品表示（ローカルサイトまたは生成した作品紹介画面）
+ipcMain.handle('show-html-work', async (_event, workId) => {
+    try {
+        const workDir = await resolveWorkDirectory(workId);
+        const configPath = path.join(workDir, 'config.json5');
+        const configData = await fs.readFile(configPath, 'utf8');
+        const config = JSON5.parse(configData);
+
+        if (config.type !== 'html') {
+            throw Object.assign(new Error('HTML作品ではない設定が指定されました。'), { code: 'INVALID_WORK_TYPE' });
         }
 
-        workWindow.show();
-
-        // ウィンドウが閉じられた時のクリーンアップ
-        workWindow.on('closed', () => {
-            console.log(`作品ウィンドウが閉じられました: ${config.title}`);
-        });
+        if (shouldOpenLocalHtml(config)) {
+            await openLocalHtmlWork(config, workDir, workId);
+        } else {
+            await openGeneratedWorkDisplay(config, workDir, workId);
+        }
 
         return { success: true };
     } catch (error) {
         console.error('HTML表示エラー:', error);
         return createErrorResponse('HTML表示', error, {
             userMessage: '作品画面を開けませんでした。',
-            recoveryHint: 'config.json5 と work_display.html の作成状態を確認してから再実行してください。',
-            context: { workId, displayHtmlPath }
+            recoveryHint: 'config.json5、htmlPath、作品ファイルの配置を確認してから再実行してください。',
+            context: { workId }
         });
     }
 });
@@ -519,22 +640,32 @@ ipcMain.handle('back-to-launcher', async (event) => {
     }
 });
 
-// 画像をBase64で取得
-ipcMain.handle('get-image-base64', async (event, imagePath) => {
+// 作品設定に記載されたサムネイルをBase64で取得
+ipcMain.handle('get-image-base64', async (_event, workId) => {
     try {
+        const workDir = await resolveWorkDirectory(workId);
+        const configData = await fs.readFile(path.join(workDir, 'config.json5'), 'utf8');
+        const config = JSON5.parse(configData);
+        const imagePath = await resolveExistingPathInside(workDir, config.thumbnail, { fileOnly: true });
         const imageData = await fs.readFile(imagePath);
         const base64 = imageData.toString('base64');
         const ext = path.extname(imagePath).toLowerCase();
-        const mimeType = ext === '.png' ? 'image/png' :
-            ext === '.jpg' || ext === '.jpeg' ? 'image/jpeg' :
-                'image/png';
+        const mimeType = ext === '.png'
+            ? 'image/png'
+            : ext === '.jpg' || ext === '.jpeg'
+                ? 'image/jpeg'
+                : ext === '.gif'
+                    ? 'image/gif'
+                    : ext === '.svg'
+                        ? 'image/svg+xml'
+                        : 'image/png';
         return { success: true, data: `data:${mimeType};base64,${base64}` };
     } catch (error) {
         console.error('画像読み込みエラー:', error);
         return createErrorResponse('画像読み込み', error, {
             userMessage: 'サムネイル画像を読み込めませんでした。',
             recoveryHint: '画像ファイルの場所と権限を確認してから再実行してください。',
-            context: { imagePath }
+            context: { workId }
         });
     }
 });
@@ -546,9 +677,12 @@ ipcMain.handle('generate-work-card-html', async (event, work, thumbnailSrc) => {
         const template = await fs.readFile(templatePath, 'utf8');
 
         const tagsSection = work.tags ? work.tags.map(tag => `<span class="work-tag">${tag}</span>`).join('') : '';
-        const buttonText = work.type === 'exe' ? 'ゲームを起動' : '作品を表示';
-        const filePath = work.type === 'exe' ? work.executablePath : work.htmlPath;
-
+        const localHtmlWork = shouldOpenLocalHtml(work);
+        const buttonText = work.type === 'exe'
+            ? 'ゲームを起動'
+            : localHtmlWork
+                ? 'サイトを開く'
+                : '作品を表示';
         return format(template, {
             thumbnailSrc: thumbnailSrc,
             title: work.title,
@@ -561,7 +695,6 @@ ipcMain.handle('generate-work-card-html', async (event, work, thumbnailSrc) => {
             credit: work.credit ? work.credit.replace(/\\n/g, '<br>') : '',
             type: work.type,
             workId: work.workId,
-            path: filePath,
             buttonText: buttonText
         }, true); // データ属性用にエスケープを有効化
     } catch (error) {

@@ -123,7 +123,7 @@ async function createWorkCard(work) {
     let thumbnailSrc = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iMzUwIiBoZWlnaHQ9IjIwMCIgdmlld0JveD0iMCAwIDM1MCAyMDAiIGZpbGw9Im5vbmUiIHhtbG5zPSJodHRwOi8vd3d3LnczLm9yZy8yMDAwL3N2ZyI+CjxyZWN0IHdpZHRoPSIzNTAiIGhlaWdodD0iMjAwIiBmaWxsPSIjZjhmOWZhIi8+Cjx0ZXh0IHg9IjE3NSIgeT0iMTAwIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIiBmaWxsPSIjN2Y4YzhkIiBmb250LWZhbWlseT0iQXJpYWwiIGZvbnQtc2l6ZT0iMTQiPk5vIEltYWdlPC90ZXh0Pgo8L3N2Zz4=';
 
     try {
-        const imageResult = await window.electronAPI.getImageBase64(work.thumbnailPath);
+        const imageResult = await window.electronAPI.getImageBase64(work.workId);
         if (imageResult.success) {
             thumbnailSrc = imageResult.data;
         } else {
@@ -150,8 +150,8 @@ async function createWorkCard(work) {
                 <div class="work-meta">
                     <span class="work-author">${work.author}</span>
                 </div>
-                <button class="launch-button ${work.type}-type" onclick="launchWork('${work.workId}', '${work.type}', '${work.type === 'exe' ? work.executablePath : work.htmlPath}')">
-                    ${work.type === 'exe' ? 'ゲームを起動' : '作品を表示'}
+                <button class="launch-button ${work.type}-type" data-work-id="${work.workId}" data-type="${work.type}" onclick="launchWork(this)">
+                    ${work.type === 'exe' ? 'ゲームを起動' : work.displayMode === 'local-html' || work.htmlPath ? 'サイトを開く' : '作品を表示'}
                 </button>
             </div>
         `;
@@ -164,7 +164,6 @@ async function createWorkCard(work) {
 async function launchWork(button) {
     const workId = button.dataset.workId;
     const type = button.dataset.type;
-    const path = button.dataset.path;
     const originalText = button.textContent;
 
     try {
@@ -174,9 +173,15 @@ async function launchWork(button) {
 
         let result;
         if (type === 'exe') {
-            result = await window.electronAPI.launchExe(workId, path);
+            result = await window.electronAPI.launchExe(workId);
         } else if (type === 'html') {
-            result = await window.electronAPI.showHtmlWork(workId, path);
+            result = await window.electronAPI.showHtmlWork(workId);
+        } else {
+            result = {
+                success: false,
+                userMessage: '未対応の作品形式です。',
+                errorCode: 'UNSUPPORTED_WORK_TYPE'
+            };
         }
 
         if (!result.success) {

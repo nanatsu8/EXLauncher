@@ -87,7 +87,7 @@ def test_handle_media_file_keeps_existing_media_classification(tmp_path):
 
     assert result["MoviePaths"] == ["movie.mp4"]
     assert result["ImagePaths"] == ["image.png"]
-    assert result["htmlPath"] == "index.html"
+    assert "htmlPath" not in result
 
 
 def test_generate_config_json5_outputs_pdf_paths(tmp_path):
