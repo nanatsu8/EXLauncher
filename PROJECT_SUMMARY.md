@@ -7,7 +7,13 @@
 システムは次の2要素で構成されています。
 
 1. Electron製の作品展示ランチャー
-2. Googleフォーム／CSV／Google Driveから展示用データを構築・配布するPython自動化ツール
+2. Googleフォームの提出データとCSVをDriveミラーから読み込み、各展示PCで作品を生成・本番反映するPython自動化ツール
+
+## 現在の運用
+
+提出されたCSV・作品・サムネイルをGoogle Drive for desktopのローカルミラーから読み込む運用は継続します。各展示PCで `build_works_from_csv` によりステージングを生成し、`apply_update` で本番へ反映します。
+
+生成済みの `works` をDriveへコピーする運用と、Driveマスターからステージングへコピーする運用は行いません。コピー用ツールの実装は残っていますが、現在の通常手順には含めません。保守引継ぎのためにプロジェクトフォルダ全体を別PCへコピーする作業は、作品配布用コピーとは別です。
 
 ## ディレクトリ構成
 
@@ -33,8 +39,8 @@ Electron製ランチャーのソースコードです。
 - `build_works_from_csv.py`: CSVとGoogle Driveのミラーファイルから `works_staging` を生成
 - `apply_update.py`: ステージングの整合性を検証し、バックアップを作って本番 `works` に切り替え
 - `update_manifest.py`: 手動編集後の `manifest.json` を再生成
-- `copy_works_to_drive.py`: ローカルの `works` をDrive側へコピー
-- `copy_drive_master_to_staging.py`: Drive上のマスターをステージングへコピー
+- `copy_works_to_drive.py`: ローカルの `works` をDrive側へコピーする実装。現在の運用では使用しない
+- `copy_drive_master_to_staging.py`: Drive上のマスターをステージングへコピーする実装。現在の運用では使用しない
 - `path_utils.py`: `{user_name}` を含むWindowsパスの解決とDriveフォルダ名の表記ゆれ対応
 - `cli_error.py`: CLI向けの共通エラー整形
 - `config.json5`: CSV、Driveミラー、ステージング、本番、バックアップのパスと列マッピング
@@ -52,8 +58,8 @@ Windows向けにビルド済みのランチャーです。`KSWL-Exhibition-Launc
 展示担当者向けの運用資料です。
 
 - `readme.md`: CSV準備から展示PCへの反映までを説明する詳細ガイド
-- `readme.pdf`: ガイドのPDF版
-- `SLIDES.md`、説明会資料: システム説明用資料
+- `readme.pdf`: `readme.md` から再出力するガイドのPDF版
+- `SLIDES.md`、説明会資料: システム説明用資料。説明会PDFはPowerPoint版から再出力する
 - `todo.md`: 検討事項・未完了事項
 
 ## 基本データフロー
@@ -78,7 +84,7 @@ apply_updateで整合性を検証
 Electronランチャーで作品を表示・起動
 ```
 
-Drive上に完成済みのマスターがある場合は、`copy_drive_master_to_staging.py` で直接ステージングへコピーする運用もあります。
+各展示PCが同じ提出データ・CSVをDriveミラーから読み込み、この生成・反映手順を実行します。生成済みの作品構造をDrive経由でほかのPCへ配布する手順は使用しません。
 
 ## 作品設定
 

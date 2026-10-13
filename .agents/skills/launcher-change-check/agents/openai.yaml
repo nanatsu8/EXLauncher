@@ -1,0 +1,3 @@
+interface:
+  display_name: "改修後の検証と配布確認"
+  short_description: "改修したランチャーの検証範囲と、ビルド・配布更新の手順を確認する"

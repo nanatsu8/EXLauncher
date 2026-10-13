@@ -2,6 +2,12 @@
 
 大学の部活動で制作した映像作品やゲームを展示するためのElectronアプリケーションです。
 
+## 現在の作品更新の運用
+
+提出されたCSV・作品・サムネイルはGoogle Drive for desktopのローカルミラーから読み込みます。各展示PCで `build_works_from_csv.exe` により `works_staging` を生成し、`apply_update.exe` で検証・バックアップ後に本番の `works` へ反映します。
+
+生成済みの `works` をDriveへコピーする機能と、Driveマスターからステージングへコピーする機能は、現在の運用では使用しません。実装が残っている `copy_works_to_drive` と `copy_drive_master_to_staging` を通常手順として実行しないでください。詳しい手順は、プロジェクトフォルダ内の `docs/readme.md` を参照してください。
+
 ## 機能
 
 - 作品ごとの設定ファイル（config.json5）に基づいた自動読み込み
